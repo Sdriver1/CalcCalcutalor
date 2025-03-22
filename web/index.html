@@ -90,7 +90,6 @@
         height: 95%;
         max-height: 800px;
       }
-
       @media (max-width: 768px) {
         body {
           flex-direction: column;
@@ -98,6 +97,7 @@
         }
         #sidebar {
           width: 100%;
+          border-right: none;
           border-bottom: 1px solid #ddd;
         }
         #graph-container {
@@ -118,8 +118,8 @@
       <input
         type="text"
         id="functionInput"
-        placeholder="Enter function (e.g., x^2)"
-        onkeypress="handleEnter(event)"
+        placeholder="Enter function (e.g., x^2, ∫_{0}^{2} x^2, d/dx x^3)"
+        onkeypress="if(event.key==='Enter'){ computeMath(); }"
       />
       <div class="math-btns">
         <button onclick="insertMath('d/dx')">d/dx</button>
@@ -158,11 +158,15 @@
         if (!rawInput) return;
         let displayString = rawInput;
         let parseString = rawInput;
+        let definiteLower = null;
+        let definiteUpper = null;
         let boundsMatch = parseString.match(/∫_\{([^}]*)\}\^\{([^}]*)\}/);
         if (!boundsMatch) {
           boundsMatch = parseString.match(/∫_([^\s\^]+)\^([^\s]+)/);
         }
         if (boundsMatch) {
+          definiteLower = boundsMatch[1];
+          definiteUpper = boundsMatch[2];
           parseString = parseString.replace(boundsMatch[0], "").trim();
           parseString = parseString.replace(/\bdx\b/g, "").trim();
         } else if (parseString.includes("∫")) {
@@ -176,14 +180,14 @@
             encodeURIComponent(parseString) +
             "&variable=x";
         } else if (rawInput.includes("∫")) {
-          if (boundsMatch && boundsMatch[1] && boundsMatch[2]) {
+          if (definiteLower && definiteUpper) {
             apiEndpoint =
               "/api/integral?expr=" +
               encodeURIComponent(parseString) +
               "&variable=x&lower=" +
-              boundsMatch[1] +
+              definiteLower +
               "&upper=" +
-              boundsMatch[2];
+              definiteUpper;
           } else {
             apiEndpoint =
               "/api/integral?expr=" +
@@ -202,11 +206,11 @@
           if (typeof resultVal === "object" && resultVal !== null) {
             document.getElementById("result").innerHTML =
               "Result: $$ " + resultVal.latex + " $$";
-            plotFunction(resultVal.expression);
+            plotFunction(resultVal.expression, definiteLower, definiteUpper);
           } else {
             document.getElementById("result").innerHTML =
               "Result: " + resultVal;
-            plotFunction(parseString);
+            plotFunction(parseString, definiteLower, definiteUpper);
           }
           MathJax.typeset();
         } catch (error) {
@@ -214,24 +218,63 @@
         }
       }
 
-      function plotFunction(expr) {
+      function plotFunction(expr, lower = null, upper = null) {
         let xValues = [];
         let yValues = [];
+        let parsedExpr;
         try {
-          const parsedExpr = math.compile(expr);
-          for (let x = -10; x <= 10; x += 0.1) {
-            xValues.push(x);
-            yValues.push(parsedExpr.evaluate({ x }));
-          }
+          parsedExpr = math.compile(expr);
         } catch (e) {
           console.error("Graphing Error:", e);
           return;
         }
-        Plotly.newPlot(
-          "graph",
-          [{ x: xValues, y: yValues, type: "scatter", mode: "lines" }],
-          { title: "Graph of " + expr }
-        );
+        for (let x = -10; x <= 10; x += 0.1) {
+          xValues.push(x);
+          try {
+            yValues.push(parsedExpr.evaluate({ x }));
+          } catch (err) {
+            yValues.push(null);
+          }
+        }
+        const mainTrace = {
+          x: xValues,
+          y: yValues,
+          type: "scatter",
+          mode: "lines",
+          name: "f(x)",
+          line: { color: "blue", width: 2 },
+        };
+
+        let traces = [mainTrace];
+
+        if (lower !== null && upper !== null) {
+          lower = parseFloat(lower);
+          upper = parseFloat(upper);
+          let shadeX = [];
+          let shadeY = [];
+          for (let x = lower; x <= upper; x += 0.01) {
+            shadeX.push(x);
+            try {
+              shadeY.push(parsedExpr.evaluate({ x }));
+            } catch (err) {
+              shadeY.push(null);
+            }
+          }
+          const shadeTrace = {
+            x: shadeX,
+            y: shadeY,
+            type: "scatter",
+            mode: "lines",
+            fill: "tozeroy",
+            fillcolor: "rgba(0, 100, 250, 0.2)",
+            line: { color: "transparent" },
+            hoverinfo: "skip",
+            showlegend: false,
+          };
+          traces.push(shadeTrace);
+        }
+
+        Plotly.newPlot("graph", traces, { title: "Graph of " + expr });
       }
     </script>
   </body>
